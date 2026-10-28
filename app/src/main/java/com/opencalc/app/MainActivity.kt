@@ -7,8 +7,13 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
+import android.view.WindowInsets
 import android.view.ViewGroup
 import android.widget.*
 import java.text.DecimalFormat
@@ -37,11 +42,13 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         dark = prefs.getBoolean("dark", true)
         history.addAll(
             prefs.getString("history", "")!!
                 .split("\n").filter { it.isNotBlank() }.take(100)
         )
+
         build()
     }
 
@@ -62,10 +69,36 @@ class MainActivity : Activity() {
             key = Color.rgb(230, 235, 243)
         }
 
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            window.decorView.systemUiVisibility =
+                if (!dark) View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR else 0
+        }
+
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(8), dp(14), dp(8))
             setBackgroundColor(bg)
+
+            // Android 15 / edge-to-edge માટે status bar ની જગ્યા સાચવો.
+            setOnApplyWindowInsetsListener { view, insets ->
+                val topInset = if (Build.VERSION.SDK_INT >= 30) {
+                    insets.getInsets(WindowInsets.Type.statusBars()).top
+                } else {
+                    @Suppress("DEPRECATION")
+                    insets.systemWindowInsetTop
+                }
+
+                view.setPadding(
+                    dp(14),
+                    topInset + dp(8),
+                    dp(14),
+                    dp(8)
+                )
+                insets
+            }
         }
 
         val header = LinearLayout(this).apply {
@@ -79,6 +112,7 @@ class MainActivity : Activity() {
                 textSize = 27f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(fg)
+                gravity = Gravity.CENTER_VERTICAL
             },
             LinearLayout.LayoutParams(0, dp(46), 1f)
         )
@@ -91,6 +125,7 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(dp(52), dp(42))
         )
+
         root.addView(header)
 
         val nav = LinearLayout(this).apply {
@@ -114,12 +149,14 @@ class MainActivity : Activity() {
                 }
             )
         }
+
         root.addView(nav)
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
         }
+
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
         when (screen) {
@@ -130,6 +167,7 @@ class MainActivity : Activity() {
         }
 
         setContentView(root)
+        root.requestApplyInsets()
     }
 
     private fun calculator() {
@@ -144,7 +182,11 @@ class MainActivity : Activity() {
             background = round(panel, dp(12))
             setPadding(dp(10), dp(6), dp(10), dp(6))
         }
-        content.addView(expressionView, LinearLayout.LayoutParams(-1, dp(54)))
+
+        content.addView(
+            expressionView,
+            LinearLayout.LayoutParams(-1, dp(54))
+        )
 
         resultView = TextView(this).apply {
             text = "પરિણામ અહીં દેખાશે"
@@ -153,9 +195,42 @@ class MainActivity : Activity() {
             setTextColor(accent)
             setPadding(dp(8), dp(3), dp(8), dp(3))
         }
-        content.addView(resultView, LinearLayout.LayoutParams(-1, dp(42)))
 
-        // મોટી મેમરી બટન લાઇન
+        content.addView(
+            resultView,
+            LinearLayout.LayoutParams(-1, dp(42))
+        )
+
+        // લાઇવ પરિણામ: લખતાં જ ગણતરી કરવાનો પ્રયત્ન કરે છે.
+        expressionView.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(
+                s: CharSequence?, start: Int, count: Int, after: Int
+            ) {}
+
+            override fun onTextChanged(
+                s: CharSequence?, start: Int, before: Int, count: Int
+            ) {
+                val input = s?.toString().orEmpty()
+                expression = input
+
+                if (input.isBlank()) {
+                    resultView.text = "પરિણામ અહીં દેખાશે"
+                    return
+                }
+
+                val value = runCatching {
+                    Parser(input).parse()
+                }.getOrNull()
+
+                if (value != null && value.isFinite()) {
+                    resultView.text = fmt(value)
+                }
+            }
+
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        // મેમરી બટનોની મોટી લાઇન
         val mem = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
@@ -165,21 +240,26 @@ class MainActivity : Activity() {
                 btn(label, key) {
                     when (label) {
                         "MC" -> memory = 0.0
+
                         "MR" -> insert(fmt(memory))
+
                         "M+" -> memory += runCatching {
                             Parser(expressionView.text.toString()).parse()
                         }.getOrDefault(0.0)
+
                         "M−" -> memory -= runCatching {
                             Parser(expressionView.text.toString()).parse()
                         }.getOrDefault(0.0)
+
                         "⌫" -> {
                             val s = expressionView.text.toString()
                             expressionView.setText(s.dropLast(1))
-                            expressionView.setSelection(expressionView.text.length)
-                            expression = expressionView.text.toString()
+                            expressionView.setSelection(
+                                expressionView.text.length
+                            )
                         }
+
                         "AC" -> {
-                            expression = ""
                             expressionView.setText("")
                             resultView.text = "પરિણામ અહીં દેખાશે"
                         }
@@ -190,6 +270,7 @@ class MainActivity : Activity() {
                 }
             )
         }
+
         content.addView(
             mem,
             LinearLayout.LayoutParams(-1, dp(44)).apply {
@@ -217,7 +298,9 @@ class MainActivity : Activity() {
             }
 
             labels.forEach { label ->
-                val operator = label in listOf("÷", "×", "−", "+", "^", "%")
+                val operator =
+                    label in listOf("÷", "×", "−", "+", "^", "%")
+
                 row.addView(
                     btn(label, if (operator) accent else key) {
                         insert(
@@ -239,13 +322,16 @@ class MainActivity : Activity() {
                 )
             }
 
-            // મુખ્ય અંકવાળી પંક્તિઓ થોડી નાની
-            // વૈજ્ઞાનિક અને વધારાના બટનોની પંક્તિઓ પણ ટૂંકી
+            // અંક અને ઓપરેટર ટાઇલ્સ અગાઉ કરતાં થોડી ઓછી ઊંચી.
             val weight = when (index) {
                 0, 5, 6 -> 0.72f
                 else -> 0.88f
             }
-            keypad.addView(row, LinearLayout.LayoutParams(-1, 0, weight))
+
+            keypad.addView(
+                row,
+                LinearLayout.LayoutParams(-1, 0, weight)
+            )
         }
 
         content.addView(
@@ -256,18 +342,23 @@ class MainActivity : Activity() {
             }
         )
 
-        // નીચે Copy ડાબી બાજુ અને મોટું = જમણી બાજુ
+        // નીચે Copy ડાબે અને મોટું = જમણે.
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
 
         bottom.addView(
             btn("Copy", key) {
-                val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                val cb =
+                    getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+
                 cb.setPrimaryClip(
                     ClipData.newPlainText("OpenCalc", resultView.text)
                 )
-                Toast.makeText(this, "Copy થયું", Toast.LENGTH_SHORT).show()
+
+                Toast.makeText(
+                    this, "Copy થયું", Toast.LENGTH_SHORT
+                ).show()
             },
             LinearLayout.LayoutParams(0, dp(52), 1f).apply {
                 marginEnd = dp(5)
@@ -277,6 +368,7 @@ class MainActivity : Activity() {
         bottom.addView(
             btn("=", accent) {
                 expression = expressionView.text.toString()
+
                 try {
                     val value = Parser(expression).parse()
                     if (!value.isFinite()) throw IllegalArgumentException()
@@ -285,15 +377,18 @@ class MainActivity : Activity() {
                     resultView.text = answer
 
                     history.add(0, "$expression = $answer")
-                    while (history.size > 100) history.removeAt(history.lastIndex)
+                    while (history.size > 100) {
+                        history.removeAt(history.lastIndex)
+                    }
 
                     prefs.edit()
                         .putString("history", history.joinToString("\n"))
                         .apply()
 
-                    expression = answer
                     expressionView.setText(answer)
-                    expressionView.setSelection(expressionView.text.length)
+                    expressionView.setSelection(
+                        expressionView.text.length
+                    )
                 } catch (_: Exception) {
                     resultView.text = "ગણતરીમાં ભૂલ"
                 }
@@ -314,11 +409,15 @@ class MainActivity : Activity() {
         val start = field.selectionStart.coerceAtLeast(0)
         val end = field.selectionEnd.coerceAtLeast(start)
         val old = field.text.toString()
-        val next = old.substring(0, start) + value + old.substring(end)
+
+        val next = old.substring(0, start) +
+            value +
+            old.substring(end)
 
         field.setText(next)
-        field.setSelection((start + value.length).coerceAtMost(next.length))
-        expression = next
+        field.setSelection(
+            (start + value.length).coerceAtMost(next.length)
+        )
     }
 
     private fun converter() {
@@ -342,7 +441,9 @@ class MainActivity : Activity() {
 
         val cat = Spinner(this)
         cat.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, cats
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            cats
         )
         content.addView(cat, params(dp(46)))
 
@@ -352,23 +453,28 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
+
         val from = Spinner(this)
         val to = Spinner(this)
 
         fun refresh() {
             val us = units[cats[cat.selectedItemPosition]]!!
+
             from.adapter = ArrayAdapter(
                 this, android.R.layout.simple_spinner_dropdown_item, us
             )
             to.adapter = ArrayAdapter(
                 this, android.R.layout.simple_spinner_dropdown_item, us
             )
+
             if (us.size > 1) to.setSelection(1)
         }
 
         cat.onItemSelectedListener =
             object : android.widget.AdapterView.OnItemSelectedListener {
-                override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+                override fun onNothingSelected(
+                    p: android.widget.AdapterView<*>?
+                ) {}
 
                 override fun onItemSelected(
                     p: android.widget.AdapterView<*>?,
@@ -381,6 +487,7 @@ class MainActivity : Activity() {
             }
 
         refresh()
+
         row.addView(from, LinearLayout.LayoutParams(0, dp(48), 1f))
         row.addView(to, LinearLayout.LayoutParams(0, dp(48), 1f))
         content.addView(row)
@@ -392,6 +499,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(18), 0, dp(18))
         }
+
         content.addView(out, params(dp(68)))
 
         content.addView(
@@ -400,8 +508,11 @@ class MainActivity : Activity() {
                     val a = amount.text.toString().toDouble()
                     val f = from.selectedItem.toString()
                     val t = to.selectedItem.toString()
+
                     out.text =
-                        "${fmt(a)} $f = ${fmt(convert(cats[cat.selectedItemPosition], a, f, t))} $t"
+                        "${fmt(a)} $f = ${
+                            fmt(convert(cats[cat.selectedItemPosition], a, f, t))
+                        } $t"
                 } catch (_: Exception) {
                     out.text = "મૂલ્ય તપાસો"
                 }
@@ -409,10 +520,14 @@ class MainActivity : Activity() {
             params(dp(48))
         )
 
-        note("Length, Weight, Temperature, Area, Volume, Speed, Time અને Data રૂપાંતરણ.")
+        note(
+            "Length, Weight, Temperature, Area, Volume, Speed, Time અને Data રૂપાંતરણ."
+        )
     }
 
-    private fun convert(cat: String, v: Double, f: String, t: String): Double {
+    private fun convert(
+        cat: String, v: Double, f: String, t: String
+    ): Double {
         if (f == t) return v
 
         if (cat == "Temperature") {
@@ -421,6 +536,7 @@ class MainActivity : Activity() {
                 "F" -> (v - 32) * 5 / 9
                 else -> v - 273.15
             }
+
             return when (t) {
                 "C" -> c
                 "F" -> c * 9 / 5 + 32
@@ -434,25 +550,31 @@ class MainActivity : Activity() {
                 "mm" to .001, "mile" to 1609.344,
                 "ft" to .3048, "inch" to .0254
             )
+
             "Weight" -> mapOf(
                 "kg" to 1.0, "g" to .001, "mg" to .000001,
                 "lb" to .45359237, "oz" to .028349523125
             )
+
             "Area" -> mapOf(
                 "m²" to 1.0, "km²" to 1e6, "ft²" to .09290304,
                 "acre" to 4046.8564224, "hectare" to 10000.0
             )
+
             "Volume" -> mapOf(
                 "L" to 1.0, "mL" to .001,
                 "m³" to 1000.0, "gal" to 3.785411784
             )
+
             "Speed" -> mapOf(
                 "m/s" to 1.0, "km/h" to (1.0 / 3.6), "mph" to .44704
             )
+
             "Time" -> mapOf(
                 "s" to 1.0, "min" to 60.0,
                 "h" to 3600.0, "day" to 86400.0
             )
+
             else -> mapOf(
                 "B" to 1.0, "KB" to 1000.0, "MB" to 1e6,
                 "GB" to 1e9, "TB" to 1e12
@@ -472,7 +594,9 @@ class MainActivity : Activity() {
 
         val mode = Spinner(this)
         mode.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, modes
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            modes
         )
         content.addView(mode, params(dp(46)))
 
@@ -513,7 +637,9 @@ class MainActivity : Activity() {
         )
 
         content.addView(out)
-        note("GST, ડિસ્કાઉન્ટ, સાદું અને ચક્રવૃદ્ધિ વ્યાજ. દર ટકા અને સમય વર્ષમાં દાખલ કરો.")
+        note(
+            "GST, ડિસ્કાઉન્ટ, સાદું અને ચક્રવૃદ્ધિ વ્યાજ. દર ટકા અને સમય વર્ષમાં દાખલ કરો."
+        )
     }
 
     private fun historyScreen() {
@@ -525,13 +651,19 @@ class MainActivity : Activity() {
 
         row.addView(
             btn("હિસ્ટ્રી Copy", key) {
-                val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                val cb =
+                    getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+
                 cb.setPrimaryClip(
                     ClipData.newPlainText(
-                        "OpenCalc history", history.joinToString("\n")
+                        "OpenCalc history",
+                        history.joinToString("\n")
                     )
                 )
-                Toast.makeText(this, "હિસ્ટ્રી Copy થઈ", Toast.LENGTH_SHORT).show()
+
+                Toast.makeText(
+                    this, "હિસ્ટ્રી Copy થઈ", Toast.LENGTH_SHORT
+                ).show()
             },
             LinearLayout.LayoutParams(0, dp(44), 1f)
         )
@@ -544,9 +676,12 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(0, dp(44), 1f)
         )
+
         content.addView(row)
 
-        if (history.isEmpty()) note("હજુ કોઈ ગણતરી સાચવાઈ નથી.")
+        if (history.isEmpty()) {
+            note("હજુ કોઈ ગણતરી સાચવાઈ નથી.")
+        }
 
         history.forEach { entry ->
             content.addView(
@@ -556,6 +691,7 @@ class MainActivity : Activity() {
                     setTextColor(fg)
                     setPadding(dp(12), dp(14), dp(12), dp(14))
                     background = round(panel, dp(10))
+
                     setOnClickListener {
                         expression = entry.substringBefore(" = ")
                         screen = "calc"
@@ -602,15 +738,23 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(5), dp(12), dp(5))
         }
 
-    private fun btn(label: String, color: Int, action: () -> Unit) =
-        Button(this).apply {
-            text = label
-            textSize = 15f
-            isAllCaps = false
-            setTextColor(if (color == key) fg else Color.WHITE)
-            background = round(color, dp(11))
-            setOnClickListener { action() }
-        }
+    private fun btn(
+        label: String,
+        color: Int,
+        action: () -> Unit
+    ) = Button(this).apply {
+        text = label
+        textSize = 15f
+        isAllCaps = false
+        minHeight = 0
+        minimumHeight = 0
+        minWidth = 0
+        minimumWidth = 0
+        setPadding(dp(3), dp(2), dp(3), dp(2))
+        setTextColor(if (color == key) fg else Color.WHITE)
+        background = round(color, dp(11))
+        setOnClickListener { action() }
+    }
 
     private fun round(color: Int, radius: Int) =
         GradientDrawable().apply {
@@ -619,7 +763,9 @@ class MainActivity : Activity() {
         }
 
     private fun params(h: Int) =
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply {
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, h
+        ).apply {
             topMargin = dp(4)
             bottomMargin = dp(4)
         }
@@ -645,30 +791,36 @@ class MainActivity : Activity() {
 
         private fun expr(): Double {
             var v = term()
+
             while (p < s.length && s[p] in charArrayOf('+', '-')) {
                 val op = s[p++]
                 val b = term()
                 v = if (op == '+') v + b else v - b
             }
+
             return v
         }
 
         private fun term(): Double {
             var v = power()
+
             while (p < s.length && s[p] in charArrayOf('*', '/')) {
                 val op = s[p++]
                 val b = power()
                 v = if (op == '*') v * b else v / b
             }
+
             return v
         }
 
         private fun power(): Double {
             var v = unary()
+
             if (p < s.length && s[p] == '^') {
                 p++
                 v = v.pow(power())
             }
+
             return v
         }
 
@@ -677,30 +829,37 @@ class MainActivity : Activity() {
                 p++
                 return unary()
             }
+
             if (p < s.length && s[p] == '-') {
                 p++
                 return -unary()
             }
 
             var v = primary()
+
             while (p < s.length) {
                 when (s[p]) {
                     '%' -> {
                         p++
                         v /= 100.0
                     }
+
                     '!' -> {
                         p++
+
                         if (v < 0 || v > 170 || v % 1.0 != 0.0) {
                             error("factorial")
                         }
+
                         var f = 1.0
                         for (i in 2..v.toInt()) f *= i
                         v = f
                     }
+
                     else -> return v
                 }
             }
+
             return v
         }
 
@@ -716,18 +875,22 @@ class MainActivity : Activity() {
 
             if (s[p].isDigit() || s[p] == '.') {
                 val start = p
+
                 while (
                     p < s.length &&
                     (s[p].isDigit() || s[p] == '.')
                 ) {
                     p++
                 }
+
                 return s.substring(start, p).toDouble()
             }
 
             if (s[p].isLetter()) {
                 val start = p
+
                 while (p < s.length && s[p].isLetter()) p++
+
                 val n = s.substring(start, p)
 
                 if (n == "pi") return PI
