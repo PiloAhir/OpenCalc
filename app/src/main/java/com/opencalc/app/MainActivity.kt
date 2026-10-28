@@ -155,6 +155,7 @@ class MainActivity : Activity() {
         }
         content.addView(resultView, LinearLayout.LayoutParams(-1, dp(42)))
 
+        // મોટી મેમરી બટન લાઇન
         val mem = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
@@ -184,12 +185,17 @@ class MainActivity : Activity() {
                         }
                     }
                 },
-                LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                     marginEnd = dp(3)
                 }
             )
         }
-        content.addView(mem)
+        content.addView(
+            mem,
+            LinearLayout.LayoutParams(-1, dp(44)).apply {
+                bottomMargin = dp(2)
+            }
+        )
 
         val keypad = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -205,7 +211,7 @@ class MainActivity : Activity() {
             listOf("log(", "ln(", "!", ")")
         )
 
-        rows.forEach { labels ->
+        rows.forEachIndexed { index, labels ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
             }
@@ -224,31 +230,49 @@ class MainActivity : Activity() {
                             }
                         )
                     },
-                    // Width is divided between buttons; height fills the row.
                     LinearLayout.LayoutParams(0, -1, 1f).apply {
                         marginStart = dp(2)
                         marginEnd = dp(2)
-                        topMargin = dp(2)
-                        bottomMargin = dp(2)
+                        topMargin = dp(1)
+                        bottomMargin = dp(1)
                     }
                 )
             }
 
-            // Every row gets an equal share of the available keypad height.
-            keypad.addView(row, LinearLayout.LayoutParams(-1, 0, 1f))
+            // મુખ્ય અંકવાળી પંક્તિઓ થોડી નાની
+            // વૈજ્ઞાનિક અને વધારાના બટનોની પંક્તિઓ પણ ટૂંકી
+            val weight = when (index) {
+                0, 5, 6 -> 0.72f
+                else -> 0.88f
+            }
+            keypad.addView(row, LinearLayout.LayoutParams(-1, 0, weight))
         }
 
         content.addView(
             keypad,
             LinearLayout.LayoutParams(-1, 0, 1f).apply {
-                topMargin = dp(2)
+                topMargin = dp(1)
                 bottomMargin = dp(2)
             }
         )
 
+        // નીચે Copy ડાબી બાજુ અને મોટું = જમણી બાજુ
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
+
+        bottom.addView(
+            btn("Copy", key) {
+                val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                cb.setPrimaryClip(
+                    ClipData.newPlainText("OpenCalc", resultView.text)
+                )
+                Toast.makeText(this, "Copy થયું", Toast.LENGTH_SHORT).show()
+            },
+            LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+                marginEnd = dp(5)
+            }
+        )
 
         bottom.addView(
             btn("=", accent) {
@@ -274,26 +298,13 @@ class MainActivity : Activity() {
                     resultView.text = "ગણતરીમાં ભૂલ"
                 }
             },
-            LinearLayout.LayoutParams(0, dp(44), 2f).apply {
-                marginEnd = dp(4)
-            }
-        )
-
-        bottom.addView(
-            btn("Copy", key) {
-                val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                cb.setPrimaryClip(
-                    ClipData.newPlainText("OpenCalc", resultView.text)
-                )
-                Toast.makeText(this, "Copy થયું", Toast.LENGTH_SHORT).show()
-            },
-            LinearLayout.LayoutParams(0, dp(44), 1f)
+            LinearLayout.LayoutParams(0, dp(52), 1.7f)
         )
 
         content.addView(
             bottom,
-            LinearLayout.LayoutParams(-1, dp(44)).apply {
-                topMargin = dp(2)
+            LinearLayout.LayoutParams(-1, dp(52)).apply {
+                topMargin = dp(3)
             }
         )
     }
@@ -594,7 +605,7 @@ class MainActivity : Activity() {
     private fun btn(label: String, color: Int, action: () -> Unit) =
         Button(this).apply {
             text = label
-            textSize = 13f
+            textSize = 15f
             isAllCaps = false
             setTextColor(if (color == key) fg else Color.WHITE)
             background = round(color, dp(11))
@@ -722,7 +733,6 @@ class MainActivity : Activity() {
                 if (n == "pi") return PI
                 if (n == "e") return E
 
-                // FIX: Parse function argument between its parentheses.
                 expect('(')
                 val x = expr()
                 expect(')')
